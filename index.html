@@ -294,7 +294,7 @@ const LB_TO_KG=0.45359237;
 /* ---------- storage ---------- */
 const KEY='lift-fuel-v1';
 let storageOk=true;
-function defaults(){return{settings:{goal:'lose',calTarget:2000,stepTarget:10000,kcalPerStep:0.035,workoutPct:75,met:4,rest:75,proteinTarget:170,waterTarget:3000,waterUnit:'ml'},days:{},routines:[],sessions:[],weights:[],active:null,seededBandPlan:false,savedFoods:[],lastBackup:null,createdAt:null}}
+function defaults(){return{settings:{goal:'lose',calTarget:2000,stepTarget:10000,kcalPerStep:0.035,stepBase:0,workoutPct:75,met:4,rest:75,proteinTarget:170,waterTarget:3000,waterUnit:'ml'},days:{},routines:[],sessions:[],weights:[],active:null,seededBandPlan:false,savedFoods:[],lastBackup:null,createdAt:null}}
 function fixEx(e){if(!Array.isArray(e.band))e.band=[];e.group??='';e.note??='';e.bw=!!e.bw;e.sets??='';e.reps??=''}
 function normalize(d){const b=defaults();d=d&&typeof d==='object'?d:{};
   const o={settings:{...b.settings,...(d.settings||{})},days:d.days||{},routines:d.routines||[],sessions:d.sessions||[],weights:d.weights||[],active:d.active||null,seededBandPlan:!!d.seededBandPlan,savedFoods:d.savedFoods||[],lastBackup:d.lastBackup||null,createdAt:d.createdAt||Date.now()};
@@ -331,7 +331,7 @@ function calc(k){const d=dayData(k),st=S.settings;
   const food=d.foods.reduce((a,f)=>a+num(f.kcal),0)+num(h.kcal);
   const protein=d.foods.reduce((a,f)=>a+num(f.protein),0)+num(h.protein);
   const steps=num(d.steps);
-  const stepKcal=Math.round(steps*num(st.kcalPerStep));
+  const stepKcal=Math.round(Math.max(0,steps-num(st.stepBase))*num(st.kcalPerStep));
   const raw=S.sessions.filter(s=>s.date===k).reduce((a,s)=>a+num(s.kcal),0);
   const workoutKcal=Math.round(raw*num(st.workoutPct,100)/100);
   const net=food-stepKcal-workoutKcal;
@@ -460,7 +460,7 @@ function renderToday(){
   const budget=c.target+c.stepKcal+c.workoutKcal;
   const pct=budget>0?Math.max(0,Math.min(100,c.food/budget*100)):0;
   const over=c.left<0;
-  const bonus=Math.round(Math.max(0,num(S.settings.stepTarget)-c.steps)*num(S.settings.kcalPerStep));
+  const bonus=Math.round(Math.max(0,num(S.settings.stepTarget)-Math.max(c.steps,num(S.settings.stepBase)))*num(S.settings.kcalPerStep));
   const d=dayData(k),st=S.settings;
   const stepPct=st.stepTarget>0?Math.min(100,c.steps/st.stepTarget*100):0;
   const wd=parseKey(k).getDay();
@@ -534,7 +534,7 @@ function renderToday(){
     <div class="rb"><span class="label k k-steps">Steps</span><span class="edithint">Edit</span></div>
     <div class="big"><span class="bignum md num">${fmt(c.steps)}</span><span class="of">of ${fmt(st.stepTarget)}</span></div>
     <div class="bar steps"><i style="width:${stepPct}%"></i></div>
-    <div class="small">≈ <b class="num">${fmt(c.stepKcal)} kcal</b> burned at ${trimNum(st.kcalPerStep)} kcal per step</div>
+    <div class="small">${num(st.stepBase)?(c.steps>num(st.stepBase)?`<b class="num">+${fmt(c.stepKcal)} kcal</b> for ${fmt(c.steps-num(st.stepBase))} steps above your usual ${fmt(st.stepBase)}`:`Your first ${fmt(st.stepBase)} steps are already in your target. Steps past that add food.`):`≈ <b class="num">${fmt(c.stepKcal)} kcal</b> burned at ${trimNum(st.kcalPerStep)} kcal per step`}</div>
     ${d.stepsSyncedAt?`<div class="note">Synced from Health at ${new Date(d.stepsSyncedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}</div>`:''}
   </button>
   ${activeCardHtml()}${plannedHtml}
@@ -605,6 +605,7 @@ const SETTINGS={
   proteinTarget:{label:'Daily protein',unit:'grams',help:'Aim for about 0.8–1 g per pound of goal weight. For you that is roughly 160–190 g.',show:v=>fmt(v)+' g'},
   stepTarget:{label:'Daily steps',unit:'steps',help:'Your daily step goal.',show:v=>fmt(v)},
   kcalPerStep:{label:'Calories per step',unit:'kcal',help:'How many calories one step burns. The default is 0.04. Heavier bodies and brisker walking burn a little more per step.',show:v=>trimNum(v)+' kcal'},
+  stepBase:{label:'Steps already in target',unit:'steps',help:'Steps up to this number are already counted in your daily calories, so they add nothing. Only steps past it add food. Set 0 to count every step.',show:v=>num(v)?fmt(v):'None'},
   workoutPct:{label:'Workout burn counted',unit:'%',help:'How much of your logged workout calories comes off your net. Use less than 100% if you think the estimates run high.',show:v=>fmt(v)+'%'},
   met:{label:'Workout intensity (MET)',unit:'MET',help:'Only used for the "Use estimate" button when logging a session: MET × body weight (kg) × hours. Typical weight training is 3.5 to 6.',show:v=>trimNum(v)},
   rest:{label:'Rest timer',unit:'seconds',help:'How long the rest timer runs after you check off a set in a workout.',show:v=>fmt(v)+' s'},
@@ -721,7 +722,8 @@ function stepsSheet(){
   updStepsHint();
 }
 function updStepsHint(){const el=$('#s-hint');if(!el)return;const v=num($('#s-steps').value);
-  el.innerHTML=`${fmt(v)} steps × ${trimNum(S.settings.kcalPerStep)} kcal = <b>${fmt(v*S.settings.kcalPerStep)} kcal</b> burned`}
+  const b=num(S.settings.stepBase),x=Math.max(0,v-b);
+  el.innerHTML=b?`${fmt(x)} steps above your usual ${fmt(b)} × ${trimNum(S.settings.kcalPerStep)} = <b>+${fmt(x*S.settings.kcalPerStep)} kcal</b> to eat`:`${fmt(v)} steps × ${trimNum(S.settings.kcalPerStep)} kcal = <b>${fmt(v*S.settings.kcalPerStep)} kcal</b> burned`}
 
 function sessionSheet(id,fromRoutine){
   let s;
